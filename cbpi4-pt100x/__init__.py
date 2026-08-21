@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import statistics
 import time
 from subprocess import call
 
@@ -85,6 +86,18 @@ logger = logging.getLogger(__name__)
             configurable=True,
             default_value=1,
             description="Calculate Average between 2 values. Must be between 0 and 1. 1 deactivates averaging",
+        ),
+        Property.Number(
+            label="sample_count",
+            configurable=True,
+            default_value=5,
+            description="Read sensor this many times and use median value. Must be >= 1",
+        ),
+        Property.Number(
+            label="sample_delay_ms",
+            configurable=True,
+            default_value=30,
+            description="Delay between sampled readings in milliseconds. Must be >= 0",
         ),
         Property.Select(
             label="Wires",
@@ -174,6 +187,14 @@ class CustomSensor(CBPiSensor):
         if self.alpha >= 1 or self.alpha <= 0:
             self.alpha = 1
 
+        self.sample_count = int(self.props.get("sample_count", 5))
+        if self.sample_count < 1:
+            self.sample_count = 1
+
+        self.sample_delay_ms = float(self.props.get("sample_delay_ms", 30))
+        if self.sample_delay_ms < 0:
+            self.sample_delay_ms = 0
+
         self.value_old = 9999
         # defines how often a large delta can be rejected
         self.max_counter = 2
@@ -256,6 +277,24 @@ class CustomSensor(CBPiSensor):
             temp = round((9.0 / 5.0 * temp + 32 + self.offset), 2)
         return temp
 
+    async def read_median(self):
+        values = []
+        for index in range(self.sample_count):
+            try:
+                values.append(self.read())
+            except Exception as e:
+                logging.warning(
+                    "Sensor {}: sampled read failed: {}".format(self.sensor.name, e)
+                )
+
+            if index < self.sample_count - 1 and self.sample_delay_ms > 0:
+                await asyncio.sleep(self.sample_delay_ms / 1000)
+
+        if len(values) == 0:
+            return self.value_old if self.value_old != 9999 else 0
+
+        return round(statistics.median(values), 2)
+
     async def Confirm(self, **kwargs):
         pass
 
@@ -270,7 +309,7 @@ class CustomSensor(CBPiSensor):
         )
 
         while self.running == True:
-            self.temp = self.read()
+            self.temp = await self.read_median()
             if self.value_old == 9999:
                 self.value_old = self.temp
 

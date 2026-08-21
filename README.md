@@ -40,12 +40,16 @@ The sensor must be configured on the hardware page. The following parameters mus
 - offset: Defines a temperature offset for your temp probe.
 - ignore_above: Ignores Temp readings above this value (0: deactivated)
 - ignore_below: Ignores Temp readings below this value (0: deactivated)
+- sample_count: Reads the sensor multiple times per cycle and uses the median value. Default is 5. Set to 1 to approximate single-read behavior.
+- sample_delay_ms: Delay in milliseconds between sampled readings used for the median. Default is 30 ms.
 - ignore_delta: If you experience issues with 'jumping' temp readings, you can define a threshold (only positive values are allowed) for the difference between two readings. If the difference between two subsequent readings is higher than the threshold, the value will be ignored. If the next reading is also higher (lower), this value is used / logged. (0: deactivated)
 - alpha: calculates the average between 2 subsequent values. Must be between 0 and 1. (1: deactivated). 0.5 yields for instance in the average of two subsequent readings.
 - Wires: You need to set this parameter to the configuration of your RTD (2,3 or 4 wire).
 - Interval: defines the frequency of sensor readings in seconds.
 - Kettle/Fermenter: You can select a Kettle OR Fermenter if you want to activate reduced sensor logging during inactivity of the Kettle / Fermenter
 - Reducedlogging: Defines the logging interval for reduced logging in seconds (e.g. 300 would result in logging every 5 Minutes when the Kettle / Fermenter logic is not active) (0: no sensor logging during inactivity)
+
+Filtering order: first a median value is calculated from sampled readings (`sample_count` + `sample_delay_ms`). This median is then used for `ignore_below/ignore_above`, `ignore_delta`, and `alpha` processing.
 
 
 Please note that the max board delivers readings above 900C if no sensor is connected to the board.
