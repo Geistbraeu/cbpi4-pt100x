@@ -206,19 +206,10 @@ worker thread so waiting for the ADC does not block the asyncio event loop.
 Invalid or timed-out samples are excluded. If all samples fail, the existing
 filter returns the last value, or zero before the first valid value.
 
-## Tests
-
-Hardware-independent tests require `smbus2`, but no running CraftBeerPi server:
-the I2C bus is mocked, and Windows tests also stub the Linux-only `fcntl` API.
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-
 Please note that the max board delivers readings above 900C if no sensor is connected to the board.
 
 ![Sensor Configuration](https://github.com/PiBrewing/cbpi4-pt100x/blob/main/Hardware_Configuration.png?raw=true)
+![ADS Sensor Configuration](Hardware_Configuration_ADS.png)
 
 ### Changelog:
 
