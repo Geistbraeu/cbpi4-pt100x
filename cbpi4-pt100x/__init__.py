@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import math
 import statistics
 import time
 from subprocess import call
@@ -68,8 +69,13 @@ logger = logging.getLogger(__name__)
         ),
         Property.Select(
             label="RefRest",
-            options=[430, 470, 4300, 4700],
-            description="Reference resistor in ohms: MAX31865 typically 430/4300; ADS122C04 example 470 for PT100",
+            options=[430, 4300],
+            description="MAX31865 reference resistor in ohms: 430 for PT100 or 4300 for PT1000",
+        ),
+        Property.Number(
+            label="ADSRefRest",
+            configurable=True,
+            description="ADS122C04 measured reference resistor in ohms (decimals allowed). Leave empty to use saved RefRest, or 470/4700 for a new PT100/PT1000 sensor. Ignored for MAX31865",
         ),
         Property.Number(
             label="offset",
@@ -116,7 +122,7 @@ logger = logging.getLogger(__name__)
         Property.Select(
             label="Wires",
             options=[2, 3, 4],
-            description="MAX31865: 2, 3 or 4 wires. ADS122C04: ignored, fixed 4-wire measurement",
+            description="Select RTD wiring. ADS122C04: 3 wires enables dual-IDAC compensation and requires the 3-wire diagram in README; 2 wires is uncompensated",
         ),
         Property.Select(
             label="Interval",
@@ -152,11 +158,12 @@ class CustomSensor(CBPiSensor):
         self.adc = self.props.get("ADC", "MAX31865")
         self.csPin = int(self.props.get("csPin", 17))
         self.ResSens = int(self.props.get("ResSens", 100 if self.adc == "ADS122C04" else 1000))
-        self.RefRest = float(self.props.get("RefRest", 470 if self.adc == "ADS122C04" else 4300))
         self.offset = float(self.props.get("offset", 0))
         self.low_filter = float(self.props.get("ignore_below", 0))
         self.high_filter = float(self.props.get("ignore_above", 100))
-        self.Wires = 4 if self.adc == "ADS122C04" else int(self.props.get("Wires", 2))
+        self.Wires = int(
+            self.props.get("Wires", 4 if self.adc == "ADS122C04" else 2)
+        )
         self.Interval = int(self.props.get("Interval", 5))
         self.delta_filter = float(self.props.get("ignore_delta", 0))
         if self.delta_filter < 0:
@@ -219,13 +226,25 @@ class CustomSensor(CBPiSensor):
             if self.adc == "ADS122C04":
                 from .ads122c04 import ADS122C04
 
+                reference = self.props.get("ADSRefRest")
+                if reference is None or (
+                    isinstance(reference, str) and not reference.strip()
+                ):
+                    reference = self.props.get(
+                        "RefRest", 4700 if self.ResSens == 1000 else 470
+                    )
+                self.RefRest = float(reference)
+                if not math.isfinite(self.RefRest) or self.RefRest <= 0:
+                    raise ValueError("ADSRefRest must be finite and positive")
                 self.adc_driver = ADS122C04(
                     bus=int(self.props.get("I2CBus", 1)),
                     address=int(str(self.props.get("I2CAddress", 64)), 0),
                     rtd_nominal=self.ResSens,
                     ref_resistor=self.RefRest,
+                    wires=self.Wires,
                 )
             elif self.adc == "MAX31865":
+                self.RefRest = float(self.props.get("RefRest", 4300))
                 import board
                 import digitalio
                 from adafruit_max31865 import MAX31865
