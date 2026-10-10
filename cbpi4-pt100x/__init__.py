@@ -5,9 +5,6 @@ import statistics
 import time
 from subprocess import call
 
-import board
-import digitalio
-from adafruit_max31865 import MAX31865
 from cbpi.api import *
 from cbpi.api.dataclasses import NotificationAction, NotificationType
 
@@ -16,6 +13,23 @@ logger = logging.getLogger(__name__)
 
 @parameters(
     [
+        Property.Select(
+            label="ADC",
+            options=["MAX31865", "ADS122C04"],
+            description="ADC type (default: MAX31865 for existing sensors)",
+        ),
+        Property.Number(
+            label="I2CBus",
+            configurable=True,
+            default_value=1,
+            description="ADS122C04 I2C bus number (default: 1; ignored for MAX31865)",
+        ),
+        Property.Number(
+            label="I2CAddress",
+            configurable=True,
+            default_value=64,
+            description="ADS122C04 address in decimal (64 = 0x40; ignored for MAX31865)",
+        ),
         Property.Select(
             label="csPin",
             options=[
@@ -54,8 +68,8 @@ logger = logging.getLogger(__name__)
         ),
         Property.Select(
             label="RefRest",
-            options=[430, 4300],
-            description="Reference Resistor of the MAX31865 board (430 (PT100) or 4300 ohm (PT1000) depending on your board)",
+            options=[430, 470, 4300, 4700],
+            description="Reference resistor in ohms: MAX31865 typically 430/4300; ADS122C04 example 470 for PT100",
         ),
         Property.Number(
             label="offset",
@@ -102,7 +116,7 @@ logger = logging.getLogger(__name__)
         Property.Select(
             label="Wires",
             options=[2, 3, 4],
-            description="Choose between 2, 3 or 4 wire PT100 / PT1000 connection",
+            description="MAX31865: 2, 3 or 4 wires. ADS122C04: ignored, fixed 4-wire measurement",
         ),
         Property.Select(
             label="Interval",
@@ -135,49 +149,14 @@ class CustomSensor(CBPiSensor):
         self.misoPin = 9
         self.mosiPin = 10
         self.clkPin = 11
-
-        self.pins = [
-            board.D0,
-            board.D1,
-            board.D2,
-            board.D3,
-            board.D4,
-            board.D5,
-            board.D6,
-            board.D7,
-            board.D8,
-            board.D9,
-            board.D10,
-            board.D11,
-            board.D12,
-            board.D13,
-            board.D14,
-            board.D15,
-            board.D16,
-            board.D17,
-            board.D18,
-            board.D19,
-            board.D20,
-            board.D21,
-            board.D22,
-            board.D23,
-            board.D24,
-            board.D25,
-            board.D26,
-            board.D27,
-        ]
+        self.adc = self.props.get("ADC", "MAX31865")
         self.csPin = int(self.props.get("csPin", 17))
-        try:
-            spi = board.SPI()
-        except:
-            spi = None
-        cs = digitalio.DigitalInOut(self.pins[self.csPin])
-        self.ResSens = int(self.props.get("ResSens", 1000))
-        self.RefRest = int(self.props.get("RefRest", 4300))
+        self.ResSens = int(self.props.get("ResSens", 100 if self.adc == "ADS122C04" else 1000))
+        self.RefRest = float(self.props.get("RefRest", 470 if self.adc == "ADS122C04" else 4300))
         self.offset = float(self.props.get("offset", 0))
         self.low_filter = float(self.props.get("ignore_below", 0))
         self.high_filter = float(self.props.get("ignore_above", 100))
-        self.Wires = int(self.props.get("Wires", 2))
+        self.Wires = 4 if self.adc == "ADS122C04" else int(self.props.get("Wires", 2))
         self.Interval = int(self.props.get("Interval", 5))
         self.delta_filter = float(self.props.get("ignore_delta", 0))
         if self.delta_filter < 0:
@@ -235,39 +214,52 @@ class CustomSensor(CBPiSensor):
                 action=[NotificationAction("OK", self.Confirm)],
             )
 
-        # self.max = max31865.max31865(self.csPin,self.misoPin, self.mosiPin, self.clkPin, self.ResSens, self.RefRest, int(self.ConfigReg,16))
-        if spi is not None:
-            self.max = MAX31865(
-                spi,
-                cs,
-                rtd_nominal=self.ResSens,
-                ref_resistor=self.RefRest,
-                wires=self.Wires,
+        self.adc_driver = None
+        try:
+            if self.adc == "ADS122C04":
+                from .ads122c04 import ADS122C04
+
+                self.adc_driver = ADS122C04(
+                    bus=int(self.props.get("I2CBus", 1)),
+                    address=int(str(self.props.get("I2CAddress", 64)), 0),
+                    rtd_nominal=self.ResSens,
+                    ref_resistor=self.RefRest,
+                )
+            elif self.adc == "MAX31865":
+                import board
+                import digitalio
+                from adafruit_max31865 import MAX31865
+
+                spi = board.SPI()
+                cs = digitalio.DigitalInOut(getattr(board, "D{}".format(self.csPin)))
+                self.adc_driver = MAX31865(
+                    spi,
+                    cs,
+                    rtd_nominal=self.ResSens,
+                    ref_resistor=self.RefRest,
+                    wires=self.Wires,
+                )
+            else:
+                raise ValueError("Unknown ADC type: {}".format(self.adc))
+        except Exception as exc:
+            message = "Sensor '{}': failed to initialize {}: {}".format(
+                self.sensor.name, self.adc, exc
             )
-        else:
             self.cbpi.notify(
                 "PT100X Sensor",
-                "Sensor '"
-                + str(self.sensor.name)
-                + "' failed to initialize MAX31865. Please check raspi in config, if SPI is enabled",
+                message,
                 NotificationType.ERROR,
                 action=[NotificationAction("OK", self.Confirm)],
             )
-            logging.error(
-                "Sensor {}: Failed to initialize MAX31865. Please check raspi in config, if SPI is enabled".format(
-                    self.sensor.name
-                )
-            )
-            self.max = None
+            logging.error(message)
 
     def read(self):
         # get current Unit setting for temperature (Sensor needs to be saved again or system restarted for now)
         self.TEMP_UNIT = self.get_config_value("TEMP_UNIT", "C")
-        # temp = self.max.readTemp()
-        if self.max is not None:
-            temp = self.max.temperature
+        if self.adc_driver is not None:
+            temp = self.adc_driver.temperature
         else:
-            temp = 0
+            raise RuntimeError("{} is not initialized".format(self.adc))
 
         if (
             self.TEMP_UNIT == "C"
@@ -281,7 +273,10 @@ class CustomSensor(CBPiSensor):
         values = []
         for index in range(self.sample_count):
             try:
-                values.append(self.read())
+                if self.adc == "ADS122C04":
+                    values.append(await asyncio.to_thread(self.read))
+                else:
+                    values.append(self.read())
             except Exception as e:
                 logging.warning(
                     "Sensor {}: sampled read failed: {}".format(self.sensor.name, e)

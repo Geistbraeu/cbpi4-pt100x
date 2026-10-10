@@ -21,6 +21,7 @@ setup(name='cbpi4-pt100x',
       long_description=long_description,
       long_description_content_type='text/markdown',
       install_requires=[
-          'adafruit-circuitpython-max31865'
+          'adafruit-circuitpython-max31865',
+          'smbus2'
       ], 
      )
