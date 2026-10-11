@@ -205,6 +205,8 @@ Both ADC types use the same median filter. ADS122C04 conversions run in a
 worker thread so waiting for the ADC does not block the asyncio event loop.
 Invalid or timed-out samples are excluded. If all samples fail, the existing
 filter returns the last value, or zero before the first valid value.
+When every sample in a read cycle fails, the plugin logs an error once until
+the sensor returns; it logs recovery when a later cycle produces a valid reading.
 
 Please note that the max board delivers readings above 900C if no sensor is connected to the board.
 

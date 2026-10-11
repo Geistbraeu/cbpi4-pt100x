@@ -404,6 +404,25 @@ class PluginTests(unittest.TestCase):
             with patch.object(sensor, "read", side_effect=ValueError("bad")):
                 self.assertEqual(asyncio.run(sensor.read_median()), 23)
 
+    def test_unavailable_sensor_is_logged_once_and_recovery_is_logged(self):
+        sensor = self.make_ads_sensor()
+        sensor.sample_delay_ms = 0
+
+        with patch.object(plugin.logging, "error") as log_error, \
+                patch.object(plugin.logging, "info") as log_info:
+            with patch.object(sensor, "read", side_effect=TimeoutError("ADC timeout")):
+                self.assertEqual(asyncio.run(sensor.read_median()), 0)
+                self.assertEqual(asyncio.run(sensor.read_median()), 0)
+            log_error.assert_called_once()
+            self.assertIn("no valid readings from ADS122C04", log_error.call_args[0][0])
+            self.assertIn("ADC timeout", log_error.call_args[0][0])
+
+            with patch.object(sensor, "read", return_value=25):
+                self.assertEqual(asyncio.run(sensor.read_median()), 25)
+            log_info.assert_called_once_with(
+                "Sensor test sensor: readings from ADS122C04 recovered"
+            )
+
     def test_initialization_failure(self):
         with patch.object(ads, "ADS122C04", side_effect=OSError("no I2C")):
             sensor = plugin.CustomSensor(self.cbpi, "ads", {"ADC": "ADS122C04"})

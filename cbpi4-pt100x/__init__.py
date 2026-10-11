@@ -182,6 +182,7 @@ class CustomSensor(CBPiSensor):
             self.sample_delay_ms = 0
 
         self.value_old = 9999
+        self._adc_unavailable = False
         # defines how often a large delta can be rejected
         self.max_counter = 2
         # counts subsequent rejected values
@@ -290,6 +291,7 @@ class CustomSensor(CBPiSensor):
 
     async def read_median(self):
         values = []
+        errors = []
         for index in range(self.sample_count):
             try:
                 if self.adc == "ADS122C04":
@@ -297,15 +299,35 @@ class CustomSensor(CBPiSensor):
                 else:
                     values.append(self.read())
             except Exception as e:
-                logging.warning(
-                    "Sensor {}: sampled read failed: {}".format(self.sensor.name, e)
-                )
+                errors.append(e)
 
             if index < self.sample_count - 1 and self.sample_delay_ms > 0:
                 await asyncio.sleep(self.sample_delay_ms / 1000)
 
         if len(values) == 0:
-            return self.value_old if self.value_old != 9999 else 0
+            last_value = self.value_old if self.value_old != 9999 else 0
+            if not self._adc_unavailable:
+                logging.error(
+                    "Sensor {}: no valid readings from {} after {} attempts; "
+                    "keeping value {}. Last error: {}".format(
+                        self.sensor.name, self.adc, self.sample_count,
+                        last_value, errors[-1]
+                    )
+                )
+                self._adc_unavailable = True
+            return last_value
+
+        for error in errors:
+            logging.warning(
+                "Sensor {}: sampled read failed: {}".format(self.sensor.name, error)
+            )
+        if self._adc_unavailable:
+            logging.info(
+                "Sensor {}: readings from {} recovered".format(
+                    self.sensor.name, self.adc
+                )
+            )
+            self._adc_unavailable = False
 
         return round(statistics.median(values), 2)
 
